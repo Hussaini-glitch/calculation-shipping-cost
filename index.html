@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Global Shipping Calculator</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- SheetJS / xlsx.js CDN -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+</head>
+<body class="bg-gray-100 min-h-screen flex flex-col">
+
+  <!-- Header -->
+  <header class="bg-blue-600 text-white p-4 text-center text-2xl font-bold">
+    Global Shipping Calculator
+  </header>
+
+  <!-- Main Layout -->
+  <main class="flex flex-1 flex-col md:flex-row">
+
+    <!-- Sidebar -->
+    <aside class="w-full md:w-1/3 bg-white shadow p-6">
+      <h2 class="text-xl font-semibold mb-4">Database</h2>
+      <input type="file" id="fileInput" accept=".xlsx" class="mb-4 block w-full text-sm text-gray-700">
+      <p id="dbStatus" class="font-bold text-lg"></p>
+    </aside>
+
+    <!-- Main Area -->
+    <section class="w-full md:w-2/3 p-6">
+      <h2 class="text-xl font-semibold mb-4">Shipping Details</h2>
+
+      <!-- Dropdowns -->
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+        <select id="countrySelect" class="p-2 border rounded"></select>
+        <select id="carrierSelect" class="p-2 border rounded"></select>
+        <select id="serviceSelect" class="p-2 border rounded"></select>
+      </div>
+
+      <!-- Weight & Dimensions -->
+      <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
+        <input type="number" id="actualWeight" placeholder="Actual Weight (kg)" class="p-2 border rounded">
+        <input type="number" id="length" placeholder="Length (cm)" class="p-2 border rounded">
+        <input type="number" id="width" placeholder="Width (cm)" class="p-2 border rounded">
+        <input type="number" id="height" placeholder="Height (cm)" class="p-2 border rounded">
+      </div>
+
+      <!-- Calculate Button -->
+      <button id="calculateBtn" class="bg-blue-600 text-white px-6 py-2 rounded font-bold hover:bg-blue-700">
+        Calculate
+      </button>
+
+      <!-- Result Box -->
+      <div id="resultBox" class="mt-6 p-4 bg-white shadow rounded hidden">
+        <h3 class="text-lg font-semibold mb-2">Result</h3>
+        <p id="finalPrice" class="text-xl font-bold text-green-600"></p>
+        <p id="chargeableWeight" class="text-gray-700"></p>
+        <p id="weightType" class="text-gray-700"></p>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    let shippingData = [];
+
+    // Utility: Update DB status
+    function updateDbStatus() {
+      const statusEl = document.getElementById('dbStatus');
+      if (localStorage.getItem('shippingData')) {
+        statusEl.textContent = "DATABASE ACTIVE ✅";
+        statusEl.classList.add("text-green-600");
+        statusEl.classList.remove("text-red-600");
+      } else {
+        statusEl.textContent = "DATABASE EMPTY ❌";
+        statusEl.classList.add("text-red-600");
+        statusEl.classList.remove("text-green-600");
+      }
+    }
+
+    // Load data from localStorage if available
+    function loadData() {
+      const data = localStorage.getItem('shippingData');
+      if (data) {
+        shippingData = JSON.parse(data);
+        populateDropdowns();
+      }
+    }
+
+    // Handle file upload
+    document.getElementById('fileInput').addEventListener('change', function(e) {
+      const file = e.target.files[0];
+      if (!file) return;
+
+      const reader = new FileReader();
+      reader.onload = function(event) {
+        const data = new Uint8Array(event.target.result);
+        const workbook = XLSX.read(data, { type: 'array' });
+        const sheetName = workbook.SheetNames[0];
+        const worksheet = workbook.Sheets[sheetName];
+        const jsonData = XLSX.utils.sheet_to_json(worksheet);
+
+        // Clean and store data
+        shippingData = jsonData.map(row => ({
+          Country: String(row.Country || "").trim(),
+          Carrier: String(row.Carrier || "").trim(),
+          Service: String(row.Service || "").trim(),
+          Price_0_5kg: parseFloat(row.Price_0.5kg) || 0,
+          Additional_0_5kg: parseFloat(row.Additional_0.5kg) || 0
+        }));
+
+        localStorage.setItem('shippingData', JSON.stringify(shippingData));
+        updateDbStatus();
+        populateDropdowns();
+      };
+      reader.readAsArrayBuffer(file);
+    });
+
+    // Populate dropdowns dynamically
+    function populateDropdowns() {
+      const countrySelect = document.getElementById('countrySelect');
+      const carrierSelect = document.getElementById('carrierSelect');
+      const serviceSelect = document.getElementById('serviceSelect');
+
+      // Reset
+      countrySelect.innerHTML = "<option value=''>Select Country</option>";
+      carrierSelect.innerHTML = "<option value=''>Select Carrier</option>";
+      serviceSelect.innerHTML = "<option value=''>Select Service</option>";
+
+      // Countries
+      const countries = [...new Set(shippingData.map(d => d.Country))];
+      countries.forEach(c => {
+        countrySelect.innerHTML += `<option value="${c}">${c}</option>`;
+      });
+
+      // Event listeners for linked dropdowns
+      countrySelect.addEventListener('change', () => {
+        carrierSelect.innerHTML = "<option value=''>Select Carrier</option>";
+        serviceSelect.innerHTML = "<option value=''>Select Service</option>";
+        const carriers = [...new Set(shippingData.filter(d => d.Country === countrySelect.value).map(d => d.Carrier))];
+        carriers.forEach(c => {
+          carrierSelect.innerHTML += `<option value="${c}">${c}</option>`;
+        });
+      });
+
+      carrierSelect.addEventListener('change', () => {
+        serviceSelect.innerHTML = "<option value=''>Select Service</option>";
+        const services = [...new Set(shippingData.filter(d => d.Country === countrySelect.value && d.Carrier === carrierSelect.value).map(d => d.Service))];
+        services.forEach(s => {
+          serviceSelect.innerHTML += `<option value="${s}">${s}</option>`;
+        });
+      });
+    }
+
+    // Calculation logic
+    document.getElementById('calculateBtn').addEventListener('click', () => {
+      const country = document.getElementById('countrySelect').value;
+      const carrier = document.getElementById('carrierSelect').value;
+      const service = document.getElementById('serviceSelect').value;
+      const actualWeight = parseFloat(document.getElementById('actualWeight').value) || 0;
+      const length = parseFloat(document.getElementById('length').value) || 0;
+      const width = parseFloat(document.getElementById('width').value) || 0;
+      const height = parseFloat(document.getElementById('height').value) || 0;
+
+      if (!country || !carrier || !service || actualWeight <= 0) {
+        alert("Please fill all required fields.");
+        return;
+      }
+
+      const record = shippingData.find(d => d.Country === country && d.Carrier === carrier && d.Service === service);
+      if (!record) {
+        alert("No matching shipping record found.");
+        return;
+      }
+
+      // Volumetric weight
+      const volumetricWeight = (length * width * height) / 5000;
+      let chargeableWeight = Math.max(actualWeight, volumetricWeight);
+
+      // Round up to nearest 0.5kg
+      chargeableWeight = Math.ceil(chargeableWeight * 2) / 2;
+
+      // Price calculation
+      let totalPrice = record.Price_0_5kg;
+      if (chargeableWeight > 0.5) {
+        totalPrice += ((chargeableWeight - 0.5) / 0.5) * record.Additional_0_5kg;
+      }
+
+      // Show result
+      document.getElementById('resultBox').classList.remove('hidden');
+      document.getElementById('finalPrice').textContent = `Final Price: ${totalPrice.toFixed(2)} KWD`;
+      document.getElementById('chargeableWeight').textContent = `Chargeable Weight: ${chargeableWeight.toFixed(1)} kg`;
+      document.getElementById('weightType').textContent = `Weight Type: ${chargeableWeight === actualWeight ? "Actual" : "Volumetric"}`;
+    });
+
+    // Initialize
+    updateDbStatus();
+    loadData();
+  </script
